@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>ASO Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0f1220;--card:#181c30;--line:#2a3050;--tx:#e8eaf6;--mut:#8b92b8;--ac:#6c8cff;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#ffb84d}
+*{box-sizing:border-box}
+body{margin:0;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:var(--bg);color:var(--tx);display:flex;min-height:100vh}
+aside{width:260px;background:var(--card);border-right:1px solid var(--line);padding:16px;position:sticky;top:0;height:100vh;overflow:auto}
+main{flex:1;padding:24px;min-width:0}
+h1{font-size:18px;margin:0 0 14px}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px;margin:0 0 8px;color:var(--mut)}
+input,select,textarea,button{font:inherit;background:#0f1220;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+button{cursor:pointer;background:var(--ac);border:0;color:#fff;font-weight:600}
+button.sec{background:transparent;border:1px solid var(--line);color:var(--tx)}
+button:disabled{opacity:.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grow{flex:1}
+.tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.tab{padding:8px 14px;border-radius:8px;background:var(--card);border:1px solid var(--line);cursor:pointer;color:var(--mut)}
+.tab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:500;font-size:12px;text-transform:uppercase}
+.app{display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.app:hover{background:#0f1220}.app.on{border-color:var(--ac);background:#0f1220}
+.app img,.hd img{width:40px;height:40px;border-radius:9px}
+.app small{color:var(--mut);display:block;font-size:11px}
+.hd{display:flex;gap:14px;align-items:center;margin-bottom:16px}.hd img{width:64px;height:64px;border-radius:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.stat{background:#0f1220;border:1px solid var(--line);border-radius:10px;padding:12px}.stat b{display:block;font-size:22px;margin-top:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:4px 10px;border-radius:99px;border:1px solid var(--line);cursor:pointer;color:var(--mut);font-size:12px;user-select:none}
+.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.pill{padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.up{color:var(--ok)}.down{color:var(--bad)}.mut{color:var(--mut)}
+.bar{height:8px;background:#0f1220;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+.err{color:var(--bad)}.msg{padding:30px;text-align:center;color:var(--mut)}
+.review{border-bottom:1px solid var(--line);padding:10px 0}
+.tag{display:inline-block;background:#0f1220;border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin:2px;font-size:12px}
+.shots{display:flex;gap:8px;overflow:auto}.shots img{height:260px;border-radius:10px}
+svg text{fill:var(--mut);font-size:10px}
+.ico{width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-right:6px}
+</style>
+</head>
+<body>
+<aside>
+  <h1>📊 ASO Panel</h1>
+  <div class="row" style="margin-bottom:10px">
+    <input id="newId" class="grow" placeholder="App ID veya App Store URL" style="min-width:0">
+    <button onclick="addApp()">Ekle</button>
+  </div>
+  <div id="apps"></div>
+  <div class="mut" style="font-size:11px;margin-top:16px" id="status"></div>
+  <button class="sec" style="margin-top:8px;width:100%" onclick="runDaily()">Tüm takipleri şimdi kontrol et</button>
+</aside>
+<main>
+  <div id="content"><div class="msg">Soldan bir app ekleyin veya seçin.<br>Örn: App Store URL'sindeki <b>id284882215</b> kısmı.</div></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let COUNTRIES = {}, APP = null, TAB = 'overview', SEL = JSON.parse(localStorage.sel || '["us","tr"]');
+const flag = cc => String.fromCodePoint(...[...cc.toUpperCase()].map(c => 127397 + c.charCodeAt()));
+const fmt = n => n == null ? '–' : Number(n).toLocaleString('tr-TR');
+
+async function api(path, params = {}) {
+  const r = await fetch(path + '?' + new URLSearchParams(params));
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+const loading = t => $('#tabBody').innerHTML = `<div class="msg">⏳ ${t || 'Yükleniyor...'}</div>`;
+
+async function init() {
+  COUNTRIES = await api('/api/countries');
+  await loadApps();
+  const last = localStorage.app; if (last) selectApp(last);
+  refreshStatus(); setInterval(refreshStatus, 60000);
+}
+async function refreshStatus() {
+  const s = await api('/api/status');
+  $('#status').textContent = s.lastRun ? 'Son otomatik kontrol: ' + new Date(s.lastRun * 1000).toLocaleString('tr-TR') + ' (günlük otomatik)' : 'Günlük otomatik kontrol aktif (takip edilen keyword varsa)';
+}
+async function runDaily() {
+  if (!confirm('Takip edilen tüm keyword\'ler kontrol edilecek. Biraz sürebilir.')) return;
+  const r = await api('/api/run-daily'); alert(r.checked + ' keyword kontrol edildi'); refreshStatus(); if (APP) render();
+}
+async function loadApps() {
+  const apps = await api('/api/apps');
+  $('#apps').innerHTML = apps.map(a => `<div class="app ${APP?.id == a.id ? 'on' : ''}" onclick="selectApp('${a.id}')">
+    <img src="${esc(a.icon)}"><div class="grow"><b>${esc(a.name?.slice(0, 26))}</b><small>${esc(a.developer)} · ${a.id}</small></div>
+    <span title="Sil" onclick="event.stopPropagation();delApp('${a.id}')" class="mut">✕</span></div>`).join('') || '<div class="mut">Henüz app yok</div>';
+}
+async function addApp() {
+  const v = $('#newId').value.trim(); if (!v) return;
+  try { const a = await api('/api/app/save', { id: v }); $('#newId').value = ''; await loadApps(); selectApp(a.id); }
+  catch (e) { alert(e.message); }
+}
+async function delApp(id) {
+  if (!confirm('App ve tüm geçmiş verisi silinsin mi?')) return;
+  await api('/api/app/delete', { id }); if (APP?.id == id) { APP = null; localStorage.removeItem('app'); $('#content').innerHTML = ''; } loadApps();
+}
+async function selectApp(id) {
+  const apps = await api('/api/apps');
+  APP = apps.find(a => a.id == id); if (!APP) return;
+  localStorage.app = id; loadApps(); render();
+}
+function render() {
+  const tabs = [['overview', 'Genel Bakış'], ['rank', 'Keyword Sıralama'], ['tracked', 'Takip & Geçmiş'], ['reviews', 'Yorumlar'], ['meta', 'Metadata Skoru'], ['comp', 'Rakip & Öneri']];
+  $('#content').innerHTML = `<div class="hd"><img src="${esc(APP.icon)}"><div><h2 style="margin:0">${esc(APP.name)}</h2><span class="mut">${esc(APP.developer)} · ID ${APP.id}</span></div></div>
+  <div class="tabs">${tabs.map(t => `<div class="tab ${TAB == t[0] ? 'on' : ''}" onclick="TAB='${t[0]}';render()">${t[1]}</div>`).join('')}</div><div id="tabBody"></div>`;
+  ({ overview, rank, tracked, reviews, meta, comp })[TAB]();
+}
+function countryChips(id, multi = true) {
+  return `<div class="chips" id="${id}">${Object.entries(COUNTRIES).map(([c, n]) => `<span class="chip ${SEL.includes(c) ? 'on' : ''}" data-c="${c}" onclick="toggleC(this,${multi})">${flag(c)} ${n}</span>`).join('')}</div>`;
+}
+function toggleC(el, multi) {
+  const c = el.dataset.c;
+  if (!multi) { SEL = [c]; el.parentNode.querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x == el)); }
+  else { el.classList.toggle('on'); SEL = [...el.parentNode.querySelectorAll('.chip.on')].map(x => x.dataset.c); }
+  localStorage.sel = JSON.stringify(SEL);
+}
+const stars = v => v == null ? '–' : '★ ' + v.toFixed(2);
+
+/* --------- Genel bakış --------- */
+function overview() {
+  $('#tabBody').innerHTML = `<div class="card"><h3>Ülkeler</h3>${countryChips('oc')}<div class="row" style="margin-top:10px"><button onclick="runOverview()">Analiz Et</button></div></div><div id="ov"></div>`;
+  runOverview();
+}
+async function runOverview() {
+  if (!SEL.length) return;
+  $('#ov').innerHTML = '<div class="msg">⏳ Ülkeler sorgulanıyor...</div>';
+  try {
+    const rows = await api('/api/overview', { id: APP.id, countries: SEL.join(',') });
+    const ok = rows.filter(r => r.available);
+    const tot = ok.reduce((s, r) => s + (r.count || 0), 0);
+    const first = ok[0];
+    const hist = await api('/api/ratings-history', { id: APP.id });
+    $('#ov').innerHTML = `
+    ${first ? `<div class="card"><div class="grid">
+      <div class="stat">Toplam rating (seçili ülkeler)<b>${fmt(tot)}</b></div>
+      <div class="stat">Kategori<b style="font-size:16px">${esc(first.genre)}</b></div>
+      <div class="stat">Sürüm<b>${esc(first.version)}</b></div>
+      <div class="stat">Fiyat<b>${esc(first.price)}</b></div>
+      <div class="stat">Boyut<b>${(first.size / 1048576).toFixed(0)} MB</b></div>
+      <div class="stat">Min iOS<b>${esc(first.minOs)}</b></div>
+      <div class="stat">Dil sayısı<b>${first.languages.length}</b></div>
+      <div class="stat">Son güncelleme<b style="font-size:15px">${(first.updated || '').slice(0, 10)}</b></div></div></div>` : ''}
+    <div class="card"><h3>Ülke karşılaştırma</h3><table><tr><th>Ülke</th><th>Ortalama</th><th>Rating sayısı</th><th>Mevcut sürüm</th><th>Pay</th></tr>
+    ${rows.map(r => r.available ? `<tr><td>${flag(r.country)} ${COUNTRIES[r.country]}</td><td>${stars(r.avg)}</td><td>${fmt(r.count)}</td>
+      <td>${stars(r.avgCurrent)} <span class="mut">(${fmt(r.countCurrent)})</span></td>
+      <td style="width:160px"><div class="bar"><i style="width:${tot ? 100 * (r.count || 0) / tot : 0}%"></i></div></td></tr>`
+      : `<tr><td>${flag(r.country)} ${COUNTRIES[r.country] || r.country}</td><td colspan="4" class="mut">${r.error ? '<span class=err>' + esc(r.error) + '</span>' : 'Bu ülkede yayında değil'}</td></tr>`).join('')}</table></div>
+    ${first ? `<div class="card"><h3>Ekran görüntüleri (${flag(first.country)})</h3><div class="shots">${first.screens.map(s => `<img src="${esc(s)}">`).join('')}</div></div>
+    ${first.notes ? `<div class="card"><h3>Release notes</h3><pre style="white-space:pre-wrap;font:inherit;margin:0">${esc(first.notes)}</pre></div>` : ''}` : ''}
+    <div class="card"><h3>Rating geçmişi (her analizde kaydedilir)</h3>${ratingChart(hist)}</div>`;
+  } catch (e) { $('#ov').innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+function ratingChart(hist) {
+  const by = {}; hist.forEach(h => (by[h.country] ??= []).push(h));
+  const cs = Object.keys(by).filter(c => by[c].length > 1);
+  if (!cs.length) return '<div class="mut">Grafik için en az 2 ölçüm gerekir (günlük otomatik kayıt ile dolar).</div>';
+  return cs.map(c => lineChart(by[c].map(h => h.count), by[c].map(h => h.checked_at.slice(5, 10)), `${flag(c)} ${COUNTRIES[c] || c} – rating sayısı`, false)).join('');
+}
+function lineChart(vals, labels, title, invert = true) {
+  const pts = vals.map((v, i) => ({ v, i })).filter(p => p.v != null);
+  if (pts.length < 1) return '';
+  const W = 520, H = 150, P = 28;
+  const mn = Math.min(...pts.map(p => p.v)), mx = Math.max(...pts.map(p => p.v));
+  const rg = mx - mn || 1, n = Math.max(vals.length - 1, 1);
+  const x = i => P + (W - 2 * P) * i / n;
+  const y = v => invert ? P + (H - 2 * P) * (v - mn) / rg : H - P - (H - 2 * P) * (v - mn) / rg;
+  const path = pts.map((p, k) => (k ? 'L' : 'M') + x(p.i) + ' ' + y(p.v)).join(' ');
+  return `<div style="display:inline-block;margin:0 16px 12px 0"><div class="mut" style="font-size:12px">${esc(title)}</div>
+  <svg width="${W}" height="${H}"><path d="${path}" fill="none" stroke="#6c8cff" stroke-width="2"/>
+  ${pts.map(p => `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="3" fill="#6c8cff"/><text x="${x(p.i)}" y="${y(p.v) - 7}" text-anchor="middle">${p.v}</text>`).join('')}
+  <text x="${P}" y="${H - 6}">${esc(labels[0])}</text><text x="${W - P}" y="${H - 6}" text-anchor="end">${esc(labels[labels.length - 1])}</text></svg></div>`;
+}
+
+/* --------- Keyword sıralama --------- */
+function rank() {
+  $('#tabBody').innerHTML = `<div class="card"><h3>Ülkeler</h3>${countryChips('rc')}
+  <div class="row" style="margin-top:12px">
+    <label class="mut">Keyword sayısı <select id="klimit"><option>10</option><option selected>15</option><option>25</option><option>40</option></select></label>
+    <label class="mut"><input type="checkbox" id="saveK" checked> Takip listesine ekle</label>
+    <button onclick="runRank()">🔍 Keyword'leri otomatik bul &amp; sırala</button></div>
+  <div class="mut" style="margin-top:8px">Keyword'ler app'in o ülkedeki başlık, açıklama ve kategorisinden otomatik çıkarılır.</div>
+  <details style="margin-top:8px"><summary class="mut" style="cursor:pointer">Ek keyword (opsiyonel)</summary>
+  <textarea id="kws" rows="2" style="width:100%;margin-top:6px" placeholder="virgülle ayır"></textarea></details></div><div id="rk"></div>`;
+}
+async function runRank() {
+  if (!SEL.length) return alert('Ülke seçin');
+  const extra = ($('#kws').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const limit = $('#klimit').value, save = $('#saveK').checked ? 1 : 0;
+  $('#rk').innerHTML = '<div class="card"><div id="prog" class="mut"></div><div id="rkt"></div></div>';
+  window._stop = false;
+  for (const cc of SEL) {
+    $('#prog').textContent = `${flag(cc)} ${COUNTRIES[cc]}: keyword'ler çıkarılıyor...`;
+    let kws;
+    try { kws = [...new Set([...(await api('/api/auto-keywords', { id: APP.id, country: cc, limit })), ...extra])]; }
+    catch (e) { $('#rkt').insertAdjacentHTML('beforeend', `<div class="err">${cc}: ${esc(e.message)}</div>`); continue; }
+    if (!kws.length) { $('#rkt').insertAdjacentHTML('beforeend', `<h3 style="margin-top:14px">${flag(cc)} ${COUNTRIES[cc]}</h3><div class="mut">App bu ülkede yayında değil.</div>`); continue; }
+    const tid = 't_' + cc;
+    $('#rkt').insertAdjacentHTML('beforeend', `<h3 style="margin-top:14px">${flag(cc)} ${COUNTRIES[cc]}</h3><table id="${tid}"><tr><th>Keyword</th><th>Sıra</th><th>#1 app</th></tr></table>`);
+    const rows = [];
+    for (let i = 0; i < kws.length; i++) {
+      $('#prog').textContent = `${flag(cc)} ${COUNTRIES[cc]}: ${i + 1}/${kws.length} — ${kws[i]}`;
+      try {
+        const r = (await api('/api/rank', { id: APP.id, keywords: kws[i], countries: cc, save }))[0];
+        rows.push(r);
+        rows.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+        $('#' + tid).innerHTML = '<tr><th>Keyword</th><th>Sıra</th><th>#1 app</th></tr>' + rows.map(x =>
+          `<tr><td>${esc(x.keyword)}</td><td>${x.error ? '<span class=err>hata</span>' : rankPill(x.rank)}</td><td class="mut">${esc(x.top?.[0]?.name || '')}</td></tr>`).join('');
+      } catch (e) { /* devam */ }
+    }
+  }
+  $('#prog').textContent = '✅ Tamamlandı. İlk 200 sonuç içinde aranır, "200+" = ilk 200\'de yok.' + (save ? ' Keyword\'ler takip listesine eklendi.' : '');
+}
+function rankPill(r) {
+  if (r == null) return '<span class="pill mut">200+</span>';
+  const c = r <= 10 ? 'var(--ok)' : r <= 50 ? 'var(--warn)' : 'var(--mut)';
+  return `<span class="pill" style="color:${c};border:1px solid ${c}">#${r}</span>`;
+}
+
+/* --------- Takip --------- */
+async function tracked() {
+  loading();
+  const t = await api('/api/tracked', { id: APP.id });
+  if (!t.length) return $('#tabBody').innerHTML = '<div class="msg">Takip edilen keyword yok. "Keyword Sıralama" sekmesinden ekleyin.</div>';
+  window._t = t;
+  $('#tabBody').innerHTML = `<div class="card"><div class="row" style="margin-bottom:10px"><div class="grow mut">Her gün otomatik kontrol edilir (panel açıkken/sunucu çalışırken).</div>
+  <a href="/api/export.csv?id=${APP.id}"><button class="sec">CSV indir</button></a></div>
+  <table><tr><th>Keyword</th><th>Ülke</th><th>Sıra</th><th>Değişim</th><th>Ölçüm</th><th></th></tr>
+  ${t.map((x, i) => { const d = x.prev != null && x.last != null ? x.prev - x.last : null;
+    return `<tr style="cursor:pointer" onclick="showHist(${i})"><td>${esc(x.keyword)}</td><td>${flag(x.country)} ${x.country.toUpperCase()}</td><td>${rankPill(x.last)}</td>
+    <td>${d == null ? '–' : d > 0 ? `<span class=up>▲ ${d}</span>` : d < 0 ? `<span class=down>▼ ${-d}</span>` : '='}</td><td>${x.history.length}</td>
+    <td><span class="mut" onclick="event.stopPropagation();untrack(${i})">sil</span></td></tr>`; }).join('')}</table></div><div id="hist"></div>`;
+}
+function showHist(i) {
+  const x = _t[i];
+  $('#hist').innerHTML = `<div class="card">${lineChart(x.history.map(h => h.rank ?? 201), x.history.map(h => h.at.slice(5, 16)), `${x.keyword} (${x.country.toUpperCase()}) – sıra (düşük = iyi, 201 = yok)`)}</div>`;
+}
+async function untrack(i) { const x = _t[i]; await api('/api/untrack', { id: APP.id, keyword: x.keyword, country: x.country }); tracked(); }
+
+/* --------- Yorumlar --------- */
+function reviews() {
+  $('#tabBody').innerHTML = `<div class="card"><h3>Ülke</h3>${countryChips('vc', false)}<div style="margin-top:10px"><button onclick="runReviews()">Yorumları Getir</button></div></div><div id="rv"></div>`;
+  runReviews();
+}
+async function runReviews() {
+  $('#rv').innerHTML = '<div class="msg">⏳</div>';
+  try {
+    const d = await api('/api/reviews', { id: APP.id, country: SEL[0] || 'us' });
+    if (!d.reviews.length) return $('#rv').innerHTML = '<div class="msg">Bu ülkede yorum bulunamadı.</div>';
+    const max = Math.max(...Object.values(d.distribution));
+    $('#rv').innerHTML = `<div class="card"><div class="row" style="align-items:flex-start;gap:40px"><div style="min-width:260px"><h3>Son ${d.reviews.length} yorum – ortalama ★ ${d.avg}</h3>
+      ${[5, 4, 3, 2, 1].map(s => `<div class="row" style="margin:4px 0"><span style="width:24px">${s}★</span><div class="bar grow"><i style="width:${100 * d.distribution[s] / max}%"></i></div><span style="width:30px">${d.distribution[s]}</span></div>`).join('')}</div>
+      <div class="grow"><h3>Sık geçen kelimeler</h3>${d.words.map(w => `<span class="tag">${esc(w[0])} <b>${w[1]}</b></span>`).join('')}</div></div></div>
+      <div class="card">${d.reviews.map(r => `<div class="review"><b>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</b> ${esc(r.title)} <span class="mut">· ${esc(r.author)} · v${esc(r.version)} · ${r.date}</span><div>${esc(r.text)}</div></div>`).join('')}</div>`;
+  } catch (e) { $('#rv').innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+/* --------- Metadata --------- */
+function meta() {
+  $('#tabBody').innerHTML = `<div class="card"><h3>Ülke</h3>${countryChips('mc', false)}<div style="margin-top:10px"><button onclick="runMeta()">Skoru Hesapla</button></div></div><div id="mt"></div>`;
+  runMeta();
+}
+async function runMeta() {
+  $('#mt').innerHTML = '<div class="msg">⏳</div>';
+  try {
+    const d = await api('/api/metadata', { id: APP.id, country: SEL[0] || 'us' });
+    const pc = d.score / d.max * 100, col = pc > 75 ? 'var(--ok)' : pc > 50 ? 'var(--warn)' : 'var(--bad)';
+    $('#mt').innerHTML = `<div class="card"><div class="row" style="gap:30px"><div class="stat" style="min-width:160px">ASO skoru<b style="color:${col};font-size:36px">${d.score}/${d.max}</b></div>
+      <div class="grow">${d.checks.map(c => `<div style="margin:5px 0">${c.ok ? '✅' : '⚠️'} ${esc(c.label)} <span class="mut">— ${esc(c.detail)}</span></div>`).join('')}</div></div></div>
+      <div class="card"><h3>Başlık: "${esc(d.app.name)}" (${d.titleLength}/30) · Açıklama ${d.descLength}/4000 karakter · ${d.analysis.totalWords} kelime</h3>
+      <table><tr><th>Kelime</th><th>Adet</th><th>Yoğunluk</th><th>Başlıkta</th></tr>${d.analysis.words.map(w => `<tr><td>${esc(w.word)}</td><td>${w.count}</td><td>%${w.density}</td><td>${w.inTitle ? '✅' : ''}</td></tr>`).join('')}</table>
+      ${d.analysis.phrases.length ? `<h3 style="margin-top:14px">Sık geçen ikili ifadeler</h3>${d.analysis.phrases.map(p => `<span class="tag">${esc(p.phrase)} <b>${p.count}</b></span>`).join('')}` : ''}
+      <div class="mut" style="margin-top:10px">Not: Apple'ın gizli keyword alanı ve alt başlık (subtitle) herkese açık API'de yoktur.</div></div>`;
+  } catch (e) { $('#mt').innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+
+/* --------- Rakip & öneri --------- */
+function comp() {
+  $('#tabBody').innerHTML = `<div class="card"><div class="row"><input id="ck" class="grow" placeholder="Keyword (örn: photo editor)"><button onclick="runComp()">Rakipleri Getir</button></div>
+  <h3 style="margin-top:12px">Ülke</h3>${countryChips('cc', false)}</div><div id="cp"></div>`;
+}
+async function runComp() {
+  const k = $('#ck').value.trim(); if (!k) return;
+  $('#cp').innerHTML = '<div class="msg">⏳</div>';
+  try {
+    const cc = SEL[0] || 'us';
+    const [r, sg] = await Promise.all([api('/api/rank', { id: APP.id, keywords: k, countries: cc, save: 0 }), api('/api/suggest', { keyword: k, country: cc })]);
+    const x = r[0];
+    $('#cp').innerHTML = `<div class="card"><h3>"${esc(k)}" ${flag(cc)} – senin sıran: ${rankPill(x.rank)}</h3>
+    <table><tr><th>#</th><th>App</th><th>Geliştirici</th><th>Rating</th><th>Rating sayısı</th><th>Kategori</th></tr>
+    ${x.top.map(t => `<tr style="${t.id == APP.id ? 'background:#6c8cff22' : ''}"><td>${t.rank}</td><td><img class="ico" src="${esc(t.icon)}">${esc(t.name)}</td><td>${esc(t.developer)}</td><td>${stars(t.avg)}</td><td>${fmt(t.count)}</td><td>${esc(t.genre)}</td></tr>`).join('')}</table></div>
+    <div class="card"><h3>Keyword fikirleri (rakip metinlerinde en çok geçen kelimeler)</h3>${sg.map(s => `<span class="tag">${esc(s.word)} <b>${s.apps}/15</b></span>`).join('')}</div>`;
+  } catch (e) { $('#cp').innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+}
+init();
+</script>
+</body>
+</html>

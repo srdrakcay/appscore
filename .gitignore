@@ -1,0 +1,5 @@
+aso.db
+aso.db-journal
+__pycache__/
+*.pyc
+.DS_Store
